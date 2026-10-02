@@ -47,32 +47,85 @@ jobs:
           echo "CORRECT Tourbillion source unpacked:"
           echo "$SOURCE_ZIP"
 
-      - name: Find Tourbillion app
+      - name: Find CORRECT Tourbillion front end
         shell: bash
         run: |
           set -euo pipefail
 
-          PACKAGE_JSON=$(find tourbillion-source \
-            -type f \
-            -name package.json \
-            -not -path "*/node_modules/*" \
-            | head -n 1)
+          PACKAGE_JSON=""
+
+          while IFS= read -r pkg; do
+            dir="$(dirname "$pkg")"
+
+            if [ -f "$dir/vite.config.js" ] || \
+               [ -f "$dir/vite.config.ts" ] || \
+               [ -f "$dir/src/main.jsx" ] || \
+               [ -f "$dir/src/main.tsx" ]; then
+
+              PACKAGE_JSON="$pkg"
+              break
+            fi
+
+          done < <(
+            find tourbillion-source \
+              -type f \
+              -name package.json \
+              -not -path "*/node_modules/*" \
+              -not -path "*/artifacts/*" \
+              -not -path "*/api-server/*" \
+              -not -path "*/backend/*" \
+              | sort
+          )
 
           if [ -z "$PACKAGE_JSON" ]; then
-            echo "ERROR: package.json not found."
+            echo "ERROR: Tourbillion front-end package.json not found."
+            echo ""
+            echo "Available package.json files:"
+            find tourbillion-source \
+              -type f \
+              -name package.json \
+              -not -path "*/node_modules/*" \
+              | sort
             exit 1
           fi
 
-          APP_DIR=$(dirname "$PACKAGE_JSON")
+          APP_DIR="$(dirname "$PACKAGE_JSON")"
 
           echo "APP_DIR=$APP_DIR" >> "$GITHUB_ENV"
-          echo "Tourbillion app directory:"
+
+          echo "CORRECT Tourbillion app directory:"
           echo "$APP_DIR"
+
+          echo ""
+          echo "Contents:"
+          ls -la "$APP_DIR"
+
+      - name: Verify Tourbillion source
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          echo "Using:"
+          echo "$APP_DIR"
+
+          if [ ! -f "$APP_DIR/package.json" ]; then
+            echo "ERROR: package.json missing."
+            exit 1
+          fi
+
+          if [ ! -d "$APP_DIR/src" ]; then
+            echo "ERROR: src directory missing."
+            exit 1
+          fi
+
+          echo ""
+          echo "Tourbillion source verified."
 
       - name: Install Tourbillion dependencies
         shell: bash
         run: |
           set -euo pipefail
+
           cd "$APP_DIR"
 
           if [ -f package-lock.json ]; then
@@ -85,6 +138,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+
           cd "$APP_DIR"
 
           npm run build
@@ -93,6 +147,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+
           cd "$APP_DIR"
 
           npm install \
@@ -104,6 +159,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+
           cd "$APP_DIR"
 
           WEB_DIR="dist"
@@ -127,10 +183,14 @@ jobs:
 
           echo "WEB_DIR=$WEB_DIR" >> "$GITHUB_ENV"
 
+          echo "Capacitor web directory:"
+          echo "$WEB_DIR"
+
       - name: Create Android project
         shell: bash
         run: |
           set -euo pipefail
+
           cd "$APP_DIR"
 
           if [ ! -d android ]; then
@@ -143,6 +203,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+
           cd "$APP_DIR/android"
 
           printf 'sdk.dir=%s\n' \
@@ -153,9 +214,11 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+
           cd "$APP_DIR/android"
 
           chmod +x gradlew
+
           ./gradlew assembleDebug --stacktrace
 
       - name: Collect finished APK
@@ -178,7 +241,8 @@ jobs:
           cp "$APK" \
             finished-apk/DRC-GOLF-TOURBILLION.apk
 
-          echo "FINISHED APK:"
+          echo ""
+          echo "FINISHED TOURBILLION APK:"
           ls -lh \
             finished-apk/DRC-GOLF-TOURBILLION.apk
 
