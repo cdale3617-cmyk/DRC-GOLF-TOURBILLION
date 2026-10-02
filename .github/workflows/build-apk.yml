@@ -32,12 +32,9 @@ jobs:
           set -euo pipefail
 
           corepack enable
-          corepack prepare pnpm@latest --activate
+          corepack prepare pnpm@12.8.1 --activate
 
-          echo "Node:"
           node --version
-
-          echo "pnpm:"
           pnpm --version
 
       - name: Unpack Tourbillion source
@@ -59,289 +56,23 @@ jobs:
           unzip -q "$SOURCE_ZIP" -d tourbillion-source
 
           if [ ! -f "$ROOT_DIR/package.json" ]; then
-            echo "ERROR: Workspace root not found."
+            echo "ERROR: Workspace root package.json not found."
+            exit 1
+          fi
+
+          if [ ! -f "$ROOT_DIR/pnpm-workspace.yaml" ]; then
+            echo "ERROR: pnpm-workspace.yaml not found."
             exit 1
           fi
 
           echo "ROOT_DIR=$ROOT_DIR" >> "$GITHUB_ENV"
 
-          echo "Tourbillion workspace:"
+          echo "Workspace verified:"
           echo "$ROOT_DIR"
 
-      - name: Select Tourbillion mobile app
+      - name: Verify Tourbillion mobile app
         shell: bash
         run: |
           set -euo pipefail
 
-          APP_DIR="$ROOT_DIR/artifacts/drc-golf-mobile"
-
-          if [ ! -d "$APP_DIR" ]; then
-            echo "ERROR: drc-golf-mobile directory not found."
-            exit 1
-          fi
-
-          if [ ! -f "$APP_DIR/package.json" ]; then
-            echo "ERROR: drc-golf-mobile package.json not found."
-            exit 1
-          fi
-
-          echo "APP_DIR=$APP_DIR" >> "$GITHUB_ENV"
-
-          echo ""
-          echo "======================================"
-          echo "SELECTED DRC GOLF MOBILE APP"
-          echo "======================================"
-          echo "$APP_DIR"
-
-          echo ""
-          echo "APP CONTENTS:"
-          ls -la "$APP_DIR"
-
-          echo ""
-          echo "APP PACKAGE.JSON:"
-          cat "$APP_DIR/package.json"
-
-      - name: Configure pnpm build permissions
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          cd "$ROOT_DIR"
-
-          pnpm config set dangerouslyAllowAllBuilds true --location project
-
-          echo "pnpm build scripts enabled."
-
-      - name: Install workspace dependencies
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          cd "$ROOT_DIR"
-
-          pnpm install --no-frozen-lockfile
-
-          echo ""
-          echo "Dependencies installed."
-
-      - name: Rebuild esbuild
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          cd "$ROOT_DIR"
-
-          pnpm rebuild esbuild
-
-          echo ""
-          echo "esbuild ready."
-
-      - name: Typecheck ONLY Tourbillion mobile app
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          cd "$ROOT_DIR"
-
-          echo ""
-          echo "Typechecking drc-golf-mobile only..."
-
-          pnpm \
-            --filter "./artifacts/drc-golf-mobile" \
-            run typecheck
-
-      - name: Show Tourbillion mobile scripts
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          cd "$APP_DIR"
-
-          echo ""
-          echo "AVAILABLE APP SCRIPTS:"
-
-          node -e '
-          const p = require("./package.json");
-          console.log(JSON.stringify(p.scripts || {}, null, 2));
-          '
-
-      - name: Build ONLY Tourbillion mobile app
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          cd "$ROOT_DIR"
-
-          echo ""
-          echo "======================================"
-          echo "BUILDING DRC GOLF MOBILE ONLY"
-          echo "======================================"
-
-          if node -e '
-            const p=require("./artifacts/drc-golf-mobile/package.json");
-            process.exit(p.scripts && p.scripts.build ? 0 : 1);
-          '
-          then
-            pnpm \
-              --filter "./artifacts/drc-golf-mobile" \
-              run build
-          else
-            echo "No build script in mobile package."
-            echo "Continuing with Expo Android build preparation."
-          fi
-
-      - name: Detect Expo project
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          cd "$APP_DIR"
-
-          if [ -f app.json ]; then
-            echo "Expo app.json found."
-
-          elif [ -f app.config.js ]; then
-            echo "Expo app.config.js found."
-
-          elif [ -f app.config.ts ]; then
-            echo "Expo app.config.ts found."
-
-          else
-            echo "ERROR: Expo configuration not found."
-            echo ""
-            echo "Files:"
-            find . -maxdepth 2 -type f | sort
-            exit 1
-          fi
-
-      - name: Install Expo CLI tools
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          cd "$ROOT_DIR"
-
-          pnpm \
-            --filter "./artifacts/drc-golf-mobile" \
-            add expo
-
-          echo ""
-          echo "Expo ready."
-
-      - name: Generate native Android project
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          cd "$APP_DIR"
-
-          echo ""
-          echo "Generating Android project from Expo..."
-
-          rm -rf android
-
-          pnpm exec expo prebuild \
-            --platform android \
-            --no-install
-
-          if [ ! -d android ]; then
-            echo "ERROR: Expo did not create android directory."
-            exit 1
-          fi
-
-          if [ ! -f android/gradlew ]; then
-            echo "ERROR: Android Gradle wrapper not created."
-            exit 1
-          fi
-
-          echo ""
-          echo "Android project generated."
-
-      - name: Configure Android SDK
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          cd "$APP_DIR/android"
-
-          printf 'sdk.dir=%s\n' \
-            "$ANDROID_SDK_ROOT" \
-            > local.properties
-
-          chmod +x gradlew
-
-          echo "Android SDK configured."
-
-      - name: Build Tourbillion Android APK
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          cd "$APP_DIR/android"
-
-          echo ""
-          echo "======================================"
-          echo "BUILDING DRC GOLF TOURBILLION APK"
-          echo "======================================"
-
-          ./gradlew \
-            assembleDebug \
-            --stacktrace \
-            --no-daemon
-
-      - name: Locate APK
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          APK=$(find "$APP_DIR/android" \
-            -type f \
-            -path "*/build/outputs/apk/*" \
-            -name "*.apk" \
-            | head -n 1)
-
-          if [ -z "$APK" ]; then
-            echo "ERROR: APK not found."
-
-            echo ""
-            echo "APK search results:"
-
-            find "$APP_DIR/android" \
-              -type f \
-              -name "*.apk" \
-              || true
-
-            exit 1
-          fi
-
-          echo "APK_PATH=$APK" >> "$GITHUB_ENV"
-
-          echo ""
-          echo "APK FOUND:"
-          echo "$APK"
-
-      - name: Prepare finished APK
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          mkdir -p finished-apk
-
-          cp "$APK_PATH" \
-            finished-apk/DRC-GOLF-TOURBILLION.apk
-
-          echo ""
-          echo "======================================"
-          echo "DRC GOLF TOURBILLION APK COMPLETE"
-          echo "======================================"
-
-          ls -lh \
-            finished-apk/DRC-GOLF-TOURBILLION.apk
-
-      - name: Upload Tourbillion APK
-        uses: actions/upload-artifact@v4
-        with:
-          name: DRC-GOLF-TOURBILLION-APK
-          path: finished-apk/DRC-GOLF-TOURBILLION.apk
-          if-no-files-found: error
-          retention-days: 30
+         
