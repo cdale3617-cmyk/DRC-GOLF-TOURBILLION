@@ -26,20 +26,37 @@ jobs:
         with:
           node-version: '22'
 
-      - name: Unpack Tourbillion source
+      - name: Unpack CORRECT Tourbillion source
         shell: bash
         run: |
           set -euo pipefail
+
+          SOURCE_ZIP="LinedAggravatingDigit-source.zip"
+
+          if [ ! -f "$SOURCE_ZIP" ]; then
+            echo "ERROR: Correct Tourbillion source not found:"
+            echo "$SOURCE_ZIP"
+            exit 1
+          fi
+
           rm -rf tourbillion-source
           mkdir -p tourbillion-source
-          unzip -q DRC-Golf-Tourbillion-Base44-Source-2026-09-30.zip -d tourbillion-source
-          echo "Source unpacked."
+
+          unzip -q "$SOURCE_ZIP" -d tourbillion-source
+
+          echo "CORRECT Tourbillion source unpacked:"
+          echo "$SOURCE_ZIP"
 
       - name: Find Tourbillion app
         shell: bash
         run: |
           set -euo pipefail
-          PACKAGE_JSON=$(find tourbillion-source -type f -name package.json -not -path "*/node_modules/*" | head -n 1)
+
+          PACKAGE_JSON=$(find tourbillion-source \
+            -type f \
+            -name package.json \
+            -not -path "*/node_modules/*" \
+            | head -n 1)
 
           if [ -z "$PACKAGE_JSON" ]; then
             echo "ERROR: package.json not found."
@@ -47,10 +64,12 @@ jobs:
           fi
 
           APP_DIR=$(dirname "$PACKAGE_JSON")
-          echo "APP_DIR=$APP_DIR" >> "$GITHUB_ENV"
-          echo "App directory: $APP_DIR"
 
-      - name: Install Base44 dependencies
+          echo "APP_DIR=$APP_DIR" >> "$GITHUB_ENV"
+          echo "Tourbillion app directory:"
+          echo "$APP_DIR"
+
+      - name: Install Tourbillion dependencies
         shell: bash
         run: |
           set -euo pipefail
@@ -62,19 +81,24 @@ jobs:
             npm install
           fi
 
-      - name: Build Base44 app
+      - name: Build Tourbillion web app
         shell: bash
         run: |
           set -euo pipefail
           cd "$APP_DIR"
+
           npm run build
 
-      - name: Install Capacitor
+      - name: Install Capacitor Android
         shell: bash
         run: |
           set -euo pipefail
           cd "$APP_DIR"
-          npm install @capacitor/core @capacitor/cli @capacitor/android
+
+          npm install \
+            @capacitor/core \
+            @capacitor/cli \
+            @capacitor/android
 
       - name: Configure Tourbillion Android app
         shell: bash
@@ -83,11 +107,12 @@ jobs:
           cd "$APP_DIR"
 
           WEB_DIR="dist"
+
           if [ ! -d "$WEB_DIR" ]; then
             if [ -d build ]; then
               WEB_DIR="build"
             else
-              echo "ERROR: Cannot find dist or build web output."
+              echo "ERROR: Cannot find dist or build output."
               exit 1
             fi
           fi
@@ -119,13 +144,17 @@ jobs:
         run: |
           set -euo pipefail
           cd "$APP_DIR/android"
-          printf 'sdk.dir=%s\n' "$ANDROID_SDK_ROOT" > local.properties
+
+          printf 'sdk.dir=%s\n' \
+            "$ANDROID_SDK_ROOT" \
+            > local.properties
 
       - name: Build Tourbillion APK
         shell: bash
         run: |
           set -euo pipefail
           cd "$APP_DIR/android"
+
           chmod +x gradlew
           ./gradlew assembleDebug --stacktrace
 
@@ -133,16 +162,25 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          APK=$(find "$APP_DIR/android" -type f -name "*debug*.apk" | head -n 1)
+
+          APK=$(find "$APP_DIR/android" \
+            -type f \
+            -name "*debug*.apk" \
+            | head -n 1)
 
           if [ -z "$APK" ]; then
-            echo "ERROR: APK was not produced."
+            echo "ERROR: Tourbillion APK was not produced."
             exit 1
           fi
 
           mkdir -p finished-apk
-          cp "$APK" finished-apk/DRC-GOLF-TOURBILLION.apk
-          ls -lh finished-apk/DRC-GOLF-TOURBILLION.apk
+
+          cp "$APK" \
+            finished-apk/DRC-GOLF-TOURBILLION.apk
+
+          echo "FINISHED APK:"
+          ls -lh \
+            finished-apk/DRC-GOLF-TOURBILLION.apk
 
       - name: Upload Tourbillion APK
         uses: actions/upload-artifact@v4
