@@ -1,3 +1,4 @@
+Replace the entire workflow with this. This version deliberately removes the Android setup action and the npm cache dependency, two things that can cause an immediate failure before the build even starts.
 name: Build Tourbillion APK
 
 on:
@@ -206,3 +207,4 @@ jobs:
           path: APK/DRC-GOLF-TOURBILLION.apk
           if-no-files-found: error
           retention-days: 30
+This replaces everything currently in build-apk.yml. Don't combine it with any of the earlier code.
