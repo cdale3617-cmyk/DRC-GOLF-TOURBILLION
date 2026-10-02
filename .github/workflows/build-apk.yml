@@ -114,10 +114,9 @@ jobs:
           npx cap add android
           npx cap sync android
 
-      - name: Configure Android SDK
+      -       - name: Build Tourbillion APK
         shell: bash
+        working-directory: ${{ env.PROJECT_DIR }}/android
         run: |
           set -euo pipefail
-          cd "$PROJECT_DIR/android"
-
-          echo "sdk.dir=$ANDROID_S
+          ./gradlew assembleDebug --stacktrace --no-daemon
