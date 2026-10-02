@@ -26,6 +26,20 @@ jobs:
         with:
           node-version: '22'
 
+      - name: Enable pnpm
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          corepack enable
+          corepack prepare pnpm@latest --activate
+
+          echo "Node version:"
+          node --version
+
+          echo "pnpm version:"
+          pnpm --version
+
       - name: Unpack CORRECT Tourbillion source
         shell: bash
         run: |
@@ -44,6 +58,7 @@ jobs:
 
           unzip -q "$SOURCE_ZIP" -d tourbillion-source
 
+          echo ""
           echo "CORRECT Tourbillion source unpacked:"
           echo "$SOURCE_ZIP"
 
@@ -92,11 +107,10 @@ jobs:
 
           cd "$APP_DIR"
 
-          if [ -f package-lock.json ]; then
-            npm ci
-          else
-            npm install
-          fi
+          echo ""
+          echo "Installing Tourbillion with pnpm..."
+
+          pnpm install --no-frozen-lockfile
 
       - name: Build Tourbillion web app
         shell: bash
@@ -105,7 +119,10 @@ jobs:
 
           cd "$APP_DIR"
 
-          npm run build
+          echo ""
+          echo "Building Tourbillion..."
+
+          pnpm run build
 
       - name: Install Capacitor Android
         shell: bash
@@ -114,10 +131,15 @@ jobs:
 
           cd "$APP_DIR"
 
-          npm install \
+          echo ""
+          echo "Installing Capacitor..."
+
+          pnpm add \
             @capacitor/core \
-            @capacitor/cli \
             @capacitor/android
+
+          pnpm add -D \
+            @capacitor/cli
 
       - name: Find Tourbillion web output
         shell: bash
@@ -128,15 +150,22 @@ jobs:
 
           if [ -d dist ]; then
             WEB_DIR="dist"
+
           elif [ -d build ]; then
             WEB_DIR="build"
+
           elif [ -d out ]; then
             WEB_DIR="out"
+
           else
             echo "ERROR: Cannot find Tourbillion web build output."
             echo ""
-            echo "Directory contents:"
-            find . -maxdepth 2 -type d | sort
+            echo "Directories found:"
+            find . \
+              -maxdepth 2 \
+              -type d \
+              -not -path "./node_modules*" \
+              | sort
             exit 1
           fi
 
@@ -173,10 +202,10 @@ jobs:
           cd "$APP_DIR"
 
           if [ ! -d android ]; then
-            npx cap add android
+            pnpm exec cap add android
           fi
 
-          npx cap sync android
+          pnpm exec cap sync android
 
       - name: Configure Android SDK
         shell: bash
@@ -189,6 +218,9 @@ jobs:
             "$ANDROID_SDK_ROOT" \
             > local.properties
 
+          echo ""
+          echo "Android SDK configured."
+
       - name: Build Tourbillion APK
         shell: bash
         run: |
@@ -197,6 +229,9 @@ jobs:
           cd "$APP_DIR/android"
 
           chmod +x gradlew
+
+          echo ""
+          echo "Building Android APK..."
 
           ./gradlew assembleDebug --stacktrace
 
@@ -213,6 +248,14 @@ jobs:
 
           if [ -z "$APK" ]; then
             echo "ERROR: Tourbillion APK was not produced."
+
+            echo ""
+            echo "APK search:"
+            find "$APP_DIR/android" \
+              -type f \
+              -name "*.apk" \
+              || true
+
             exit 1
           fi
 
@@ -222,7 +265,10 @@ jobs:
             finished-apk/DRC-GOLF-TOURBILLION.apk
 
           echo ""
-          echo "FINISHED APK:"
+          echo "======================================"
+          echo "DRC GOLF TOURBILLION APK COMPLETE"
+          echo "======================================"
+
           ls -lh \
             finished-apk/DRC-GOLF-TOURBILLION.apk
 
@@ -232,3 +278,4 @@ jobs:
           name: DRC-GOLF-TOURBILLION-APK
           path: finished-apk/DRC-GOLF-TOURBILLION.apk
           if-no-files-found: error
+          retention-days: 30
