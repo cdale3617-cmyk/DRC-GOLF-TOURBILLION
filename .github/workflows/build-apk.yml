@@ -12,260 +12,35 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Set up Java 17
+      - name: Set up Java 21
         uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: "17"
+          java-version: '21'
 
       - name: Set up Node 22
         uses: actions/setup-node@v4
         with:
-          node-version: "22"
+          node-version: '22'
 
       - name: Unpack Tourbillion source
         shell: bash
         run: |
           set -euo pipefail
 
-          ZIP="DRC-Golf-Tourbillion-Base44-Source-2026-09-30.zip"
+          ZIP_FILE="$(find . -maxdepth 2 -type f -iname '*.zip' | head -n 1)"
 
-          if [ ! -f "$ZIP" ]; then
-            echo "ERROR: Source ZIP not found."
-            echo "Repository files:"
-            find . -maxdepth 2 -type f | sort
+          if [ -z "${ZIP_FILE:-}" ]; then
+            echo "ERROR: Tourbillion ZIP not found."
+            find . -maxdepth 3 -type f | sort
             exit 1
           fi
 
-          echo "Source ZIP found:"
-          ls -lh "$ZIP"
+          echo "Using ZIP: $ZIP_FILE"
 
           rm -rf tourbillion-source
           mkdir -p tourbillion-source
 
-          unzip -q "$ZIP" -d tourbillion-source
+          unzip -q "$ZIP_FILE" -d tourbillion-source
 
-          echo "Source unpacked successfully."
-
-      - name: Locate Base44 project
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          PACKAGE="$(find tourbillion-source \
-            -type f \
-            -name package.json \
-            -not -path "*/node_modules/*" \
-            -print -quit)"
-
-          if [ -z "${PACKAGE:-}" ]; then
-            echo "ERROR: package.json was not found inside the ZIP."
-            find tourbillion-source -maxdepth 4 -type f | sort
-            exit 1
-          fi
-
-          PROJECT_DIR="$(dirname "$PACKAGE")"
-
-          echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
-
-          echo "========================================"
-          echo "BASE44 PROJECT FOUND"
-          echo "$PROJECT_DIR"
-          echo "========================================"
-
-          ls -la "$PROJECT_DIR"
-
-      - name: Install Base44 dependencies
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          cd "$PROJECT_DIR"
-
-          echo "Node:"
-          node --version
-
-          echo "NPM:"
-          npm --version
-
-          if [ -f package-lock.json ]; then
-            echo "Using package-lock.json"
-            npm ci || npm install
-          else
-            echo "Using npm install"
-            npm install
-          fi
-
-      - name: Build Base44 app
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          cd "$PROJECT_DIR"
-
-          npm run build
-
-          if [ -d dist ]; then
-            WEB_DIR="dist"
-          elif [ -d build ]; then
-            WEB_DIR="build"
-          else
-            echo "ERROR: Web build produced no dist or build directory."
-            ls -la
-            exit 1
-          fi
-
-          echo "WEB_DIR=$WEB_DIR" >> "$GITHUB_ENV"
-
-          echo "========================================"
-          echo "BASE44 WEB APP BUILT"
-          echo "OUTPUT: $WEB_DIR"
-          echo "========================================"
-
-      - name: Install Capacitor
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          cd "$PROJECT_DIR"
-
-          npm install \
-            @capacitor/core@latest \
-            @capacitor/android@latest
-
-          npm install \
-            --save-dev \
-            @capacitor/cli@latest
-
-          echo "Capacitor version:"
-          npx cap --version
-
-      - name: Configure Tourbillion Android app
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          cd "$PROJECT_DIR"
-
-          cat > capacitor.config.json <<EOF
-          {
-            "appId": "com.drcgolf.tourbillion",
-            "appName": "DRC Golf Tourbillion",
-            "webDir": "${WEB_DIR}",
-            "android": {
-              "allowMixedContent": true
-            }
-          }
-          EOF
-
-          echo "Capacitor configuration:"
-          cat capacitor.config.json
-
-      - name: Create Android project
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          cd "$PROJECT_DIR"
-
-          rm -rf android
-
-          npx cap add android
-          npx cap sync android
-
-          if [ ! -f android/gradlew ]; then
-            echo "ERROR: Android Gradle wrapper was not created."
-            exit 1
-          fi
-
-          chmod +x android/gradlew
-
-          echo "========================================"
-          echo "ANDROID PROJECT CREATED"
-          echo "========================================"
-
-      - name: Configure Android SDK
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          cd "$PROJECT_DIR"
-
-          SDK="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-}}"
-
-          if [ -z "$SDK" ] && [ -d "/usr/local/lib/android/sdk" ]; then
-            SDK="/usr/local/lib/android/sdk"
-          fi
-
-          if [ -z "$SDK" ]; then
-            echo "ERROR: Android SDK could not be located."
-            exit 1
-          fi
-
-          echo "Android SDK:"
-          echo "$SDK"
-
-          printf 'sdk.dir=%s\n' "$SDK" > android/local.properties
-
-          cat android/local.properties
-
-      - name: Build Tourbillion APK
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          cd "$PROJECT_DIR/android"
-
-          chmod +x gradlew
-
-          echo "Java:"
-          java -version
-
-          echo "Starting Android build..."
-
-          ./gradlew \
-            --no-daemon \
-            --stacktrace \
-            assembleDebug
-
-      - name: Collect finished APK
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          APK="$(find "$PROJECT_DIR/android/app/build/outputs/apk" \
-            -type f \
-            -name "*.apk" \
-            -print -quit)"
-
-          if [ -z "${APK:-}" ]; then
-            echo "ERROR: APK was not found."
-
-            find "$PROJECT_DIR/android" \
-              -type f \
-              -name "*.apk" \
-              -print || true
-
-            exit 1
-          fi
-
-          mkdir -p "$GITHUB_WORKSPACE/APK"
-
-          cp "$APK" \
-            "$GITHUB_WORKSPACE/APK/DRC-GOLF-TOURBILLION.apk"
-
-          echo ""
-          echo "========================================"
-          echo "DRC GOLF TOURBILLION APK CREATED"
-          echo "========================================"
-
-          ls -lh \
-            "$GITHUB_WORKSPACE/APK/DRC-GOLF-TOURBILLION.apk"
-
-      - name: Upload Tourbillion APK
-        uses: actions/upload-artifact@v4
-        with:
-          name: DRC-GOLF-TOURBILLION-APK
-          path: APK/DRC-GOLF-TOURBILLION.apk
-          if-no-files-found: error
-          retention-days: 30
+          echo "
