@@ -3,8 +3,7 @@ name: Build Tourbillion APK
 on:
   workflow_dispatch:
   push:
-    branches:
-      - main
+    branches: [main]
 
 jobs:
   build:
@@ -12,67 +11,113 @@ jobs:
     timeout-minutes: 45
 
     steps:
-      - name: Checkout repository
+      - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Set up Java 21
+      - name: Java 21
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '21'
 
-      - name: Set up Node 22
+      - name: Node 22
         uses: actions/setup-node@v4
         with:
           node-version: '22'
 
       - name: Enable pnpm
-        shell: bash
         run: |
-          set -euo pipefail
-
           corepack enable
           corepack prepare pnpm@12.8.1 --activate
-
-          node --version
           pnpm --version
 
-      - name: Unpack Tourbillion source
-        shell: bash
+      - name: Extract Tourbillion
         run: |
-          set -euo pipefail
+          set -e
 
-          SOURCE_ZIP="LinedAggravatingDigit-source.zip"
-          ROOT_DIR="tourbillion-source/LinedAggravatingDigit"
+          unzip -q LinedAggravatingDigit-source.zip -d source
 
-          if [ ! -f "$SOURCE_ZIP" ]; then
-            echo "ERROR: $SOURCE_ZIP not found."
-            exit 1
-          fi
+          ROOT="source/LinedAggravatingDigit"
+          APP="$ROOT/artifacts/drc-golf-mobile"
 
-          rm -rf tourbillion-source
-          mkdir -p tourbillion-source
+          test -f "$ROOT/package.json"
+          test -f "$ROOT/pnpm-workspace.yaml"
+          test -f "$APP/package.json"
 
-          unzip -q "$SOURCE_ZIP" -d tourbillion-source
+          echo "ROOT=$ROOT" >> "$GITHUB_ENV"
+          echo "APP=$APP" >> "$GITHUB_ENV"
 
-          if [ ! -f "$ROOT_DIR/package.json" ]; then
-            echo "ERROR: Workspace root package.json not found."
-            exit 1
-          fi
+          echo "Tourbillion mobile source found."
 
-          if [ ! -f "$ROOT_DIR/pnpm-workspace.yaml" ]; then
-            echo "ERROR: pnpm-workspace.yaml not found."
-            exit 1
-          fi
-
-          echo "ROOT_DIR=$ROOT_DIR" >> "$GITHUB_ENV"
-
-          echo "Workspace verified:"
-          echo "$ROOT_DIR"
-
-      - name: Verify Tourbillion mobile app
-        shell: bash
+      - name: Install dependencies
         run: |
-          set -euo pipefail
+          set -e
+          cd "$ROOT"
 
-         
+          pnpm config set dangerouslyAllowAllBuilds true --location project
+          pnpm install --no-frozen-lockfile
+          pnpm rebuild esbuild
+
+      - name: Check Tourbillion
+        run: |
+          set -e
+          cd "$ROOT"
+
+          pnpm \
+            --filter "./artifacts/drc-golf-mobile" \
+            run typecheck
+
+          echo "Tourbillion check passed."
+
+      - name: Generate Android
+        run: |
+          set -e
+          cd "$APP"
+
+          rm -rf android
+
+          pnpm exec expo prebuild \
+            --platform android \
+            --no-install
+
+          test -f android/gradlew
+          test -d android/app
+
+          echo "Android project generated."
+
+      - name: Build APK
+        run: |
+          set -e
+          cd "$APP/android"
+
+          printf 'sdk.dir=%s\n' "$ANDROID_SDK_ROOT" > local.properties
+
+          chmod +x gradlew
+
+          ./gradlew \
+            :app:assembleDebug \
+            --stacktrace \
+            --no-daemon
+
+      - name: Collect APK
+        run: |
+          set -e
+
+          APK="$APP/android/app/build/outputs/apk/debug/app-debug.apk"
+
+          test -s "$APK"
+
+          mkdir -p apk
+
+          cp "$APK" apk/DRC-GOLF-TOURBILLION.apk
+
+          echo "APK CREATED:"
+          ls -lh apk/DRC-GOLF-TOURBILLION.apk
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: DRC-GOLF-TOURBILLION-APK
+          path: apk/DRC-GOLF-TOURBILLION.apk
+          if-no-files-found: error
+          retention-days: 30
