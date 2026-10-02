@@ -9,7 +9,6 @@ jobs:
     timeout-minutes: 45
 
     steps:
-
       - name: Checkout repository
         uses: actions/checkout@v4
 
@@ -19,14 +18,10 @@ jobs:
           distribution: temurin
           java-version: "17"
 
-      - name: Set up Node 20
+      - name: Set up Node 22
         uses: actions/setup-node@v4
         with:
-          node-version: "20"
-
-      # -------------------------------------------------
-      # UNPACK THE BASE44 SOURCE ZIP
-      # -------------------------------------------------
+          node-version: "22"
 
       - name: Unpack Tourbillion source
         shell: bash
@@ -52,10 +47,6 @@ jobs:
 
           echo "Source unpacked successfully."
 
-      # -------------------------------------------------
-      # FIND THE ACTUAL BASE44 PROJECT
-      # -------------------------------------------------
-
       - name: Locate Base44 project
         shell: bash
         run: |
@@ -69,7 +60,6 @@ jobs:
 
           if [ -z "${PACKAGE:-}" ]; then
             echo "ERROR: package.json was not found inside the ZIP."
-            echo "ZIP contents:"
             find tourbillion-source -maxdepth 4 -type f | sort
             exit 1
           fi
@@ -85,10 +75,6 @@ jobs:
 
           ls -la "$PROJECT_DIR"
 
-      # -------------------------------------------------
-      # INSTALL THE ORIGINAL APP
-      # -------------------------------------------------
-
       - name: Install Base44 dependencies
         shell: bash
         run: |
@@ -96,20 +82,19 @@ jobs:
 
           cd "$PROJECT_DIR"
 
-          npm --version
+          echo "Node:"
           node --version
+
+          echo "NPM:"
+          npm --version
 
           if [ -f package-lock.json ]; then
             echo "Using package-lock.json"
             npm ci || npm install
           else
-            echo "No package-lock.json - using npm install"
+            echo "Using npm install"
             npm install
           fi
-
-      # -------------------------------------------------
-      # BUILD BASE44 / VITE APP
-      # -------------------------------------------------
 
       - name: Build Base44 app
         shell: bash
@@ -126,7 +111,6 @@ jobs:
             WEB_DIR="build"
           else
             echo "ERROR: Web build produced no dist or build directory."
-            echo "Project contents:"
             ls -la
             exit 1
           fi
@@ -134,13 +118,9 @@ jobs:
           echo "WEB_DIR=$WEB_DIR" >> "$GITHUB_ENV"
 
           echo "========================================"
-          echo "WEB APP BUILT"
+          echo "BASE44 WEB APP BUILT"
           echo "OUTPUT: $WEB_DIR"
           echo "========================================"
-
-      # -------------------------------------------------
-      # ADD CAPACITOR
-      # -------------------------------------------------
 
       - name: Install Capacitor
         shell: bash
@@ -157,9 +137,8 @@ jobs:
             --save-dev \
             @capacitor/cli@latest
 
-      # -------------------------------------------------
-      # CREATE CAPACITOR CONFIG
-      # -------------------------------------------------
+          echo "Capacitor version:"
+          npx cap --version
 
       - name: Configure Tourbillion Android app
         shell: bash
@@ -182,10 +161,6 @@ jobs:
           echo "Capacitor configuration:"
           cat capacitor.config.json
 
-      # -------------------------------------------------
-      # CREATE ANDROID PROJECT
-      # -------------------------------------------------
-
       - name: Create Android project
         shell: bash
         run: |
@@ -196,7 +171,6 @@ jobs:
           rm -rf android
 
           npx cap add android
-
           npx cap sync android
 
           if [ ! -f android/gradlew ]; then
@@ -206,11 +180,9 @@ jobs:
 
           chmod +x android/gradlew
 
-          echo "Android project created."
-
-      # -------------------------------------------------
-      # USE GITHUB'S INSTALLED ANDROID SDK
-      # -------------------------------------------------
+          echo "========================================"
+          echo "ANDROID PROJECT CREATED"
+          echo "========================================"
 
       - name: Configure Android SDK
         shell: bash
@@ -230,16 +202,12 @@ jobs:
             exit 1
           fi
 
-          echo "Using Android SDK:"
+          echo "Android SDK:"
           echo "$SDK"
 
           printf 'sdk.dir=%s\n' "$SDK" > android/local.properties
 
           cat android/local.properties
-
-      # -------------------------------------------------
-      # BUILD APK
-      # -------------------------------------------------
 
       - name: Build Tourbillion APK
         shell: bash
@@ -250,14 +218,15 @@ jobs:
 
           chmod +x gradlew
 
+          echo "Java:"
+          java -version
+
+          echo "Starting Android build..."
+
           ./gradlew \
             --no-daemon \
             --stacktrace \
             assembleDebug
-
-      # -------------------------------------------------
-      # FIND AND RENAME APK
-      # -------------------------------------------------
 
       - name: Collect finished APK
         shell: bash
@@ -270,11 +239,13 @@ jobs:
             -print -quit)"
 
           if [ -z "${APK:-}" ]; then
-            echo "ERROR: Android build finished but APK was not found."
+            echo "ERROR: APK was not found."
+
             find "$PROJECT_DIR/android" \
               -type f \
               -name "*.apk" \
               -print || true
+
             exit 1
           fi
 
@@ -290,10 +261,6 @@ jobs:
 
           ls -lh \
             "$GITHUB_WORKSPACE/APK/DRC-GOLF-TOURBILLION.apk"
-
-      # -------------------------------------------------
-      # MAKE APK DOWNLOADABLE FROM GITHUB
-      # -------------------------------------------------
 
       - name: Upload Tourbillion APK
         uses: actions/upload-artifact@v4
