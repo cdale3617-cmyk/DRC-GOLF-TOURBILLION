@@ -27,14 +27,18 @@ jobs:
 
       - name: Enable pnpm
         run: |
+          set -e
+
           corepack enable
           corepack prepare pnpm@12.8.1 --activate
+
           pnpm --version
 
       - name: Extract Tourbillion
         run: |
           set -e
 
+          rm -rf source
           unzip -q LinedAggravatingDigit-source.zip -d source
 
           ROOT="source/LinedAggravatingDigit"
@@ -52,26 +56,31 @@ jobs:
       - name: Install dependencies
         run: |
           set -e
+
           cd "$ROOT"
 
           pnpm config set dangerouslyAllowAllBuilds true --location project
           pnpm install --no-frozen-lockfile
           pnpm rebuild esbuild
 
+          echo "Dependencies installed."
+
       - name: Check Tourbillion
         run: |
           set -e
+
           cd "$ROOT"
 
           pnpm \
             --filter "./artifacts/drc-golf-mobile" \
             run typecheck
 
-          echo "Tourbillion check passed."
+          echo "Tourbillion typecheck passed."
 
       - name: Generate Android
         run: |
           set -e
+
           cd "$APP"
 
           rm -rf android
@@ -85,9 +94,12 @@ jobs:
 
           echo "Android project generated."
 
-      - name: Build APK
+      - name: Build standalone release APK
+        env:
+          NODE_ENV: production
         run: |
           set -e
+
           cd "$APP/android"
 
           printf 'sdk.dir=%s\n' "$ANDROID_SDK_ROOT" > local.properties
@@ -95,29 +107,58 @@ jobs:
           chmod +x gradlew
 
           ./gradlew \
-            :app:assembleDebug \
+            :app:assembleRelease \
             --stacktrace \
             --no-daemon
+
+          echo "Release build completed."
+
+      - name: Verify bundled standalone APK
+        run: |
+          set -e
+
+          APK="$APP/android/app/build/outputs/apk/release/app-release.apk"
+
+          if [ ! -s "$APK" ]; then
+            echo "ERROR: Release APK was not created."
+            exit 1
+          fi
+
+          echo "Release APK found:"
+          ls -lh "$APK"
+
+          unzip -l "$APK" > apk-contents.txt
+
+          if grep -q "index.android.bundle" apk-contents.txt; then
+            echo "SUCCESS: index.android.bundle is packaged in the APK."
+          elif grep -q "assets/index.android.bundle" apk-contents.txt; then
+            echo "SUCCESS: React Native bundle is packaged in the APK."
+          else
+            echo "ERROR: React Native JavaScript bundle is NOT inside the APK."
+            echo "This APK would require Metro and must not be uploaded."
+            exit 1
+          fi
 
       - name: Collect APK
         run: |
           set -e
 
-          APK="$APP/android/app/build/outputs/apk/debug/app-debug.apk"
+          APK="$APP/android/app/build/outputs/apk/release/app-release.apk"
 
           test -s "$APK"
 
+          rm -rf apk
           mkdir -p apk
 
           cp "$APK" apk/DRC-GOLF-TOURBILLION.apk
 
-          echo "APK CREATED:"
+          echo "STANDALONE APK CREATED:"
           ls -lh apk/DRC-GOLF-TOURBILLION.apk
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: DRC-GOLF-TOURBILLION-APK
+          name: DRC-GOLF-TOURBILLION-STANDALONE-APK
           path: apk/DRC-GOLF-TOURBILLION.apk
           if-no-files-found: error
           retention-days: 30
