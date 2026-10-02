@@ -28,95 +28,122 @@ jobs:
         run: |
           set -euo pipefail
           rm -rf tourbillion-source
-          mkdir tourbillion-source
+          mkdir -p tourbillion-source
           unzip -q DRC-Golf-Tourbillion-Base44-Source-2026-09-30.zip -d tourbillion-source
-          echo "Tourbillion source unpacked successfully"
+          echo "Source unpacked."
 
-      - name: Locate Tourbillion project
+      - name: Find Tourbillion app
         shell: bash
         run: |
           set -euo pipefail
-          PACKAGE=$(find tourbillion-source -type f -name package.json -not -path '*/node_modules/*' | head -n 1)
+          PACKAGE_JSON=$(find tourbillion-source -type f -name package.json -not -path "*/node_modules/*" | head -n 1)
 
-          if [ -z "$PACKAGE" ]; then
-            echo "ERROR: package.json not found"
-            find tourbillion-source -maxdepth 4 -type f | sort
+          if [ -z "$PACKAGE_JSON" ]; then
+            echo "ERROR: package.json not found."
             exit 1
           fi
 
-          PROJECT_DIR=$(dirname "$PACKAGE")
-          echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
-          echo "Project found at $PROJECT_DIR"
+          APP_DIR=$(dirname "$PACKAGE_JSON")
+          echo "APP_DIR=$APP_DIR" >> "$GITHUB_ENV"
+          echo "App directory: $APP_DIR"
 
-      - name: Install Tourbillion dependencies
+      - name: Install Base44 dependencies
         shell: bash
         run: |
           set -euo pipefail
-          cd "$PROJECT_DIR"
+          cd "$APP_DIR"
 
           if [ -f package-lock.json ]; then
-            npm ci || npm install
+            npm ci
           else
             npm install
           fi
 
-      - name: Build Tourbillion web app
+      - name: Build Base44 app
         shell: bash
         run: |
           set -euo pipefail
-          cd "$PROJECT_DIR"
+          cd "$APP_DIR"
           npm run build
 
       - name: Install Capacitor
         shell: bash
         run: |
           set -euo pipefail
-          cd "$PROJECT_DIR"
-          npm install @capacitor/core@latest @capacitor/cli@latest @capacitor/android@latest
+          cd "$APP_DIR"
+          npm install @capacitor/core @capacitor/cli @capacitor/android
 
-      - name: Create Capacitor configuration
+      - name: Configure Tourbillion Android app
         shell: bash
         run: |
           set -euo pipefail
-          cd "$PROJECT_DIR"
+          cd "$APP_DIR"
 
-          rm -f capacitor.config.ts capacitor.config.json
-
-          printf '%s\n' \
-            '{' \
-            '  "appId": "com.drcgolf.tourbillion",' \
-            '  "appName": "DRC Golf Tourbillion",' \
-            '  "webDir": "dist"' \
-            '}' > capacitor.config.json
-
-          cat capacitor.config.json
-
-      - name: Check web build
-        shell: bash
-        run: |
-          set -euo pipefail
-          cd "$PROJECT_DIR"
-
-          if [ ! -d dist ]; then
-            echo "ERROR: dist folder not found"
-            exit 1
+          WEB_DIR="dist"
+          if [ ! -d "$WEB_DIR" ]; then
+            if [ -d build ]; then
+              WEB_DIR="build"
+            else
+              echo "ERROR: Cannot find dist or build web output."
+              exit 1
+            fi
           fi
 
-          echo "Web build ready"
+          cat > capacitor.config.json <<EOF
+          {
+            "appId": "com.drcgolf.tourbillion",
+            "appName": "DRC Golf Tourbillion",
+            "webDir": "$WEB_DIR"
+          }
+          EOF
+
+          echo "WEB_DIR=$WEB_DIR" >> "$GITHUB_ENV"
 
       - name: Create Android project
         shell: bash
         run: |
           set -euo pipefail
-          cd "$PROJECT_DIR"
+          cd "$APP_DIR"
 
-          rm -rf android
-          npx cap add android
+          if [ ! -d android ]; then
+            npx cap add android
+          fi
+
           npx cap sync android
 
-      -       - name: Build Tourbillion APK
+      - name: Configure Android SDK
         shell: bash
-        working-directory: ${{ env.PROJECT_DIR }}/android
         run: |
           set -euo pipefail
-          ./gradlew assembleDebug --stacktrace --no-daemon
+          cd "$APP_DIR/android"
+          printf 'sdk.dir=%s\n' "$ANDROID_SDK_ROOT" > local.properties
+
+      - name: Build Tourbillion APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$APP_DIR/android"
+          chmod +x gradlew
+          ./gradlew assembleDebug --stacktrace
+
+      - name: Collect finished APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          APK=$(find "$APP_DIR/android" -type f -name "*debug*.apk" | head -n 1)
+
+          if [ -z "$APK" ]; then
+            echo "ERROR: APK was not produced."
+            exit 1
+          fi
+
+          mkdir -p finished-apk
+          cp "$APK" finished-apk/DRC-GOLF-TOURBILLION.apk
+          ls -lh finished-apk/DRC-GOLF-TOURBILLION.apk
+
+      - name: Upload Tourbillion APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: DRC-GOLF-TOURBILLION-APK
+          path: finished-apk/DRC-GOLF-TOURBILLION.apk
+          if-no-files-found: error
