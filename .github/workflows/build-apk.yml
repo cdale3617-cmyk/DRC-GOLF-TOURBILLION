@@ -34,10 +34,10 @@ jobs:
           corepack enable
           corepack prepare pnpm@latest --activate
 
-          echo "Node:"
+          echo "Node version:"
           node --version
 
-          echo "pnpm:"
+          echo "pnpm version:"
           pnpm --version
 
       - name: Unpack CORRECT Tourbillion source
@@ -48,7 +48,7 @@ jobs:
           SOURCE_ZIP="LinedAggravatingDigit-source.zip"
 
           if [ ! -f "$SOURCE_ZIP" ]; then
-            echo "ERROR: Correct Tourbillion source ZIP not found."
+            echo "ERROR: Tourbillion source ZIP not found."
             exit 1
           fi
 
@@ -82,40 +82,23 @@ jobs:
           echo "TOURBILLION DIRECTORY:"
           echo "$APP_DIR"
 
-          echo ""
           ls -la "$APP_DIR"
 
-      - name: Allow esbuild
+      - name: Configure pnpm build permissions
         shell: bash
         run: |
           set -euo pipefail
 
           cd "$APP_DIR"
 
-          node -e '
-          const fs = require("fs");
+          echo ""
+          echo "Configuring pnpm build permissions..."
 
-          const file = "package.json";
-          const pkg = JSON.parse(fs.readFileSync(file, "utf8"));
-
-          pkg.pnpm = pkg.pnpm || {};
-
-          const allowed = new Set(
-            pkg.pnpm.onlyBuiltDependencies || []
-          );
-
-          allowed.add("esbuild");
-
-          pkg.pnpm.onlyBuiltDependencies = Array.from(allowed);
-
-          fs.writeFileSync(
-            file,
-            JSON.stringify(pkg, null, 2) + "\n"
-          );
-          '
+          pnpm config set dangerouslyAllowAllBuilds true --location project
 
           echo ""
-          echo "esbuild approved for pnpm."
+          echo "pnpm configuration:"
+          pnpm config get dangerouslyAllowAllBuilds
 
       - name: Install Tourbillion dependencies
         shell: bash
@@ -123,6 +106,9 @@ jobs:
           set -euo pipefail
 
           cd "$APP_DIR"
+
+          echo ""
+          echo "Installing Tourbillion workspace..."
 
           pnpm install --no-frozen-lockfile
 
@@ -136,7 +122,7 @@ jobs:
           pnpm rebuild esbuild
 
           echo ""
-          echo "esbuild rebuilt successfully."
+          echo "esbuild ready."
 
       - name: Build Tourbillion web app
         shell: bash
@@ -146,7 +132,7 @@ jobs:
           cd "$APP_DIR"
 
           echo ""
-          echo "Building DRC Golf Tourbillion..."
+          echo "BUILDING TOURBILLION WEB APP..."
 
           pnpm run build
 
@@ -183,6 +169,9 @@ jobs:
           else
             echo "ERROR: Tourbillion web output not found."
 
+            echo ""
+            echo "Available directories:"
+
             find . \
               -maxdepth 2 \
               -type d \
@@ -195,7 +184,7 @@ jobs:
           echo "WEB_DIR=$WEB_DIR" >> "$GITHUB_ENV"
 
           echo ""
-          echo "WEB OUTPUT:"
+          echo "TOURBILLION WEB OUTPUT:"
           echo "$WEB_DIR"
 
       - name: Configure Tourbillion Android app
@@ -214,6 +203,7 @@ jobs:
           EOF
 
           echo ""
+          echo "CAPACITOR CONFIG:"
           cat capacitor.config.json
 
       - name: Create Android project
@@ -252,11 +242,11 @@ jobs:
           chmod +x gradlew
 
           echo ""
-          echo "BUILDING TOURBILLION APK..."
+          echo "BUILDING DRC GOLF TOURBILLION APK..."
 
           ./gradlew assembleDebug --stacktrace
 
-      - name: Find finished Tourbillion APK
+      - name: Collect finished Tourbillion APK
         shell: bash
         run: |
           set -euo pipefail
@@ -268,7 +258,7 @@ jobs:
             | head -n 1)
 
           if [ -z "$APK" ]; then
-            echo "ERROR: APK was not produced."
+            echo "ERROR: Tourbillion APK was not produced."
 
             find "$APP_DIR/android" \
               -type f \
