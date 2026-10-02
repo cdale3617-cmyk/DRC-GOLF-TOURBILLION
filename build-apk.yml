@@ -1,4 +1,4 @@
-Replace the entire workflow with this. This version deliberately removes the Android setup action and the npm cache dependency, two things that can cause an immediate failure before the build even starts.
+Ready. Replace the entire build-apk.yml with this. This one starts by unpacking the ZIP that GitHub showed us.
 name: Build Tourbillion APK
 
 on:
@@ -10,34 +10,68 @@ jobs:
     timeout-minutes: 45
 
     steps:
-      - name: Checkout
+
+      - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Java 17
+      - name: Set up Java 17
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: "17"
 
-      - name: Node 20
+      - name: Set up Node 20
         uses: actions/setup-node@v4
         with:
           node-version: "20"
 
-      - name: Locate Base44 app
+      # -------------------------------------------------
+      # UNPACK THE BASE44 SOURCE ZIP
+      # -------------------------------------------------
+
+      - name: Unpack Tourbillion source
         shell: bash
         run: |
           set -euo pipefail
 
-          PACKAGE="$(find . \
+          ZIP="DRC-Golf-Tourbillion-Base44-Source-2026-09-30.zip"
+
+          if [ ! -f "$ZIP" ]; then
+            echo "ERROR: Source ZIP not found."
+            echo "Repository files:"
+            find . -maxdepth 2 -type f | sort
+            exit 1
+          fi
+
+          echo "Source ZIP found:"
+          ls -lh "$ZIP"
+
+          rm -rf tourbillion-source
+          mkdir -p tourbillion-source
+
+          unzip -q "$ZIP" -d tourbillion-source
+
+          echo "Source unpacked successfully."
+
+      # -------------------------------------------------
+      # FIND THE ACTUAL BASE44 PROJECT
+      # -------------------------------------------------
+
+      - name: Locate Base44 project
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          PACKAGE="$(find tourbillion-source \
             -type f \
             -name package.json \
             -not -path "*/node_modules/*" \
             -print -quit)"
 
           if [ -z "${PACKAGE:-}" ]; then
-            echo "ERROR: No package.json found."
-            find . -maxdepth 3 -type f | sort
+            echo "ERROR: package.json was not found inside the ZIP."
+            echo "ZIP contents:"
+            find tourbillion-source -maxdepth 4 -type f | sort
             exit 1
           fi
 
@@ -45,8 +79,16 @@ jobs:
 
           echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
 
-          echo "PROJECT FOUND:"
+          echo "========================================"
+          echo "BASE44 PROJECT FOUND"
           echo "$PROJECT_DIR"
+          echo "========================================"
+
+          ls -la "$PROJECT_DIR"
+
+      # -------------------------------------------------
+      # INSTALL THE ORIGINAL APP
+      # -------------------------------------------------
 
       - name: Install Base44 dependencies
         shell: bash
@@ -55,11 +97,20 @@ jobs:
 
           cd "$PROJECT_DIR"
 
+          npm --version
+          node --version
+
           if [ -f package-lock.json ]; then
+            echo "Using package-lock.json"
             npm ci || npm install
           else
+            echo "No package-lock.json - using npm install"
             npm install
           fi
+
+      # -------------------------------------------------
+      # BUILD BASE44 / VITE APP
+      # -------------------------------------------------
 
       - name: Build Base44 app
         shell: bash
@@ -71,14 +122,26 @@ jobs:
           npm run build
 
           if [ -d dist ]; then
-            echo "WEB_DIR=dist" >> "$GITHUB_ENV"
+            WEB_DIR="dist"
           elif [ -d build ]; then
-            echo "WEB_DIR=build" >> "$GITHUB_ENV"
+            WEB_DIR="build"
           else
-            echo "ERROR: Build completed but no dist or build directory exists."
+            echo "ERROR: Web build produced no dist or build directory."
+            echo "Project contents:"
             ls -la
             exit 1
           fi
+
+          echo "WEB_DIR=$WEB_DIR" >> "$GITHUB_ENV"
+
+          echo "========================================"
+          echo "WEB APP BUILT"
+          echo "OUTPUT: $WEB_DIR"
+          echo "========================================"
+
+      # -------------------------------------------------
+      # ADD CAPACITOR
+      # -------------------------------------------------
 
       - name: Install Capacitor
         shell: bash
@@ -95,7 +158,11 @@ jobs:
             --save-dev \
             @capacitor/cli@latest
 
-      - name: Create Capacitor configuration
+      # -------------------------------------------------
+      # CREATE CAPACITOR CONFIG
+      # -------------------------------------------------
+
+      - name: Configure Tourbillion Android app
         shell: bash
         run: |
           set -euo pipefail
@@ -113,9 +180,14 @@ jobs:
           }
           EOF
 
+          echo "Capacitor configuration:"
           cat capacitor.config.json
 
-      - name: Create Android app
+      # -------------------------------------------------
+      # CREATE ANDROID PROJECT
+      # -------------------------------------------------
+
+      - name: Create Android project
         shell: bash
         run: |
           set -euo pipefail
@@ -125,11 +197,21 @@ jobs:
           rm -rf android
 
           npx cap add android
+
           npx cap sync android
 
-          test -f android/gradlew
+          if [ ! -f android/gradlew ]; then
+            echo "ERROR: Android Gradle wrapper was not created."
+            exit 1
+          fi
 
           chmod +x android/gradlew
+
+          echo "Android project created."
+
+      # -------------------------------------------------
+      # USE GITHUB'S INSTALLED ANDROID SDK
+      # -------------------------------------------------
 
       - name: Configure Android SDK
         shell: bash
@@ -140,23 +222,27 @@ jobs:
 
           SDK="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-}}"
 
-          if [ -z "$SDK" ]; then
-            if [ -d /usr/local/lib/android/sdk ]; then
-              SDK="/usr/local/lib/android/sdk"
-            else
-              echo "ERROR: Android SDK not found."
-              exit 1
-            fi
+          if [ -z "$SDK" ] && [ -d "/usr/local/lib/android/sdk" ]; then
+            SDK="/usr/local/lib/android/sdk"
           fi
 
-          echo "ANDROID SDK: $SDK"
+          if [ -z "$SDK" ]; then
+            echo "ERROR: Android SDK could not be located."
+            exit 1
+          fi
+
+          echo "Using Android SDK:"
+          echo "$SDK"
 
           printf 'sdk.dir=%s\n' "$SDK" > android/local.properties
 
-          "$SDK/cmdline-tools/latest/bin/sdkmanager" \
-            --licenses < /dev/null >/dev/null 2>&1 || true
+          cat android/local.properties
 
-      - name: Build APK
+      # -------------------------------------------------
+      # BUILD APK
+      # -------------------------------------------------
+
+      - name: Build Tourbillion APK
         shell: bash
         run: |
           set -euo pipefail
@@ -170,21 +256,26 @@ jobs:
             --stacktrace \
             assembleDebug
 
-      - name: Collect APK
+      # -------------------------------------------------
+      # FIND AND RENAME APK
+      # -------------------------------------------------
+
+      - name: Collect finished APK
         shell: bash
         run: |
           set -euo pipefail
 
-          cd "$PROJECT_DIR"
-
-          APK="$(find android/app/build/outputs/apk \
+          APK="$(find "$PROJECT_DIR/android/app/build/outputs/apk" \
             -type f \
             -name "*.apk" \
             -print -quit)"
 
           if [ -z "${APK:-}" ]; then
-            echo "ERROR: APK not found."
-            find android -type f -name "*.apk" -print || true
+            echo "ERROR: Android build finished but APK was not found."
+            find "$PROJECT_DIR/android" \
+              -type f \
+              -name "*.apk" \
+              -print || true
             exit 1
           fi
 
@@ -193,12 +284,17 @@ jobs:
           cp "$APK" \
             "$GITHUB_WORKSPACE/APK/DRC-GOLF-TOURBILLION.apk"
 
+          echo ""
           echo "========================================"
-          echo "TOURBILLION APK BUILT"
+          echo "DRC GOLF TOURBILLION APK CREATED"
           echo "========================================"
 
           ls -lh \
             "$GITHUB_WORKSPACE/APK/DRC-GOLF-TOURBILLION.apk"
+
+      # -------------------------------------------------
+      # MAKE APK DOWNLOADABLE FROM GITHUB
+      # -------------------------------------------------
 
       - name: Upload Tourbillion APK
         uses: actions/upload-artifact@v4
@@ -207,4 +303,5 @@ jobs:
           path: APK/DRC-GOLF-TOURBILLION.apk
           if-no-files-found: error
           retention-days: 30
-This replaces everything currently in build-apk.yml. Don't combine it with any of the earlier code.
+This specifically fixes the error we just found: the app source stays in the ZIP until the workflow unpacks it first.
+Delete the old contents, paste all of this, then Commit changes.
