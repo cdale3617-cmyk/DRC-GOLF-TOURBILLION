@@ -27,20 +27,97 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          rm -rf tourbillion-source
+          mkdir tourbillion-source
+          unzip -q DRC-Golf-Tourbillion-Base44-Source-2026-09-30.zip -d tourbillion-source
+          echo "Tourbillion source unpacked successfully"
 
-          ZIP_FILE="$(find . -maxdepth 2 -type f -iname '*.zip' | head -n 1)"
+      - name: Locate Tourbillion project
+        shell: bash
+        run: |
+          set -euo pipefail
+          PACKAGE=$(find tourbillion-source -type f -name package.json -not -path '*/node_modules/*' | head -n 1)
 
-          if [ -z "${ZIP_FILE:-}" ]; then
-            echo "ERROR: Tourbillion ZIP not found."
-            find . -maxdepth 3 -type f | sort
+          if [ -z "$PACKAGE" ]; then
+            echo "ERROR: package.json not found"
+            find tourbillion-source -maxdepth 4 -type f | sort
             exit 1
           fi
 
-          echo "Using ZIP: $ZIP_FILE"
+          PROJECT_DIR=$(dirname "$PACKAGE")
+          echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
+          echo "Project found at $PROJECT_DIR"
 
-          rm -rf tourbillion-source
-          mkdir -p tourbillion-source
+      - name: Install Tourbillion dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$PROJECT_DIR"
 
-          unzip -q "$ZIP_FILE" -d tourbillion-source
+          if [ -f package-lock.json ]; then
+            npm ci || npm install
+          else
+            npm install
+          fi
 
-          echo "
+      - name: Build Tourbillion web app
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$PROJECT_DIR"
+          npm run build
+
+      - name: Install Capacitor
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$PROJECT_DIR"
+          npm install @capacitor/core@latest @capacitor/cli@latest @capacitor/android@latest
+
+      - name: Create Capacitor configuration
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$PROJECT_DIR"
+
+          rm -f capacitor.config.ts capacitor.config.json
+
+          printf '%s\n' \
+            '{' \
+            '  "appId": "com.drcgolf.tourbillion",' \
+            '  "appName": "DRC Golf Tourbillion",' \
+            '  "webDir": "dist"' \
+            '}' > capacitor.config.json
+
+          cat capacitor.config.json
+
+      - name: Check web build
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$PROJECT_DIR"
+
+          if [ ! -d dist ]; then
+            echo "ERROR: dist folder not found"
+            exit 1
+          fi
+
+          echo "Web build ready"
+
+      - name: Create Android project
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$PROJECT_DIR"
+
+          rm -rf android
+          npx cap add android
+          npx cap sync android
+
+      - name: Configure Android SDK
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$PROJECT_DIR/android"
+
+          echo "sdk.dir=$ANDROID_S
